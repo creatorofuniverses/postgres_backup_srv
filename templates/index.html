@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PostgreSQL Backup Monitor</title>
+    <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11.7.32/dist/sweetalert2.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .card {
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .card-header {
+            font-weight: bold;
+        }
+
+        .status-good {
+            color: #198754;
+        }
+
+        .status-warning {
+            color: #fd7e14;
+        }
+
+        .status-danger {
+            color: #dc3545;
+        }
+
+        .refresh-btn {
+            margin-bottom: 20px;
+        }
+
+        .table-responsive {
+            margin-top: 15px;
+            max-height: 300px;
+            /* Make tables scrollable */
+            overflow-y: auto;
+        }
+
+        .last-check {
+            font-style: italic;
+            margin-bottom: 20px;
+        }
+
+        .backup-action {
+            cursor: pointer;
+            color: #0d6efd;
+        }
+
+        .backup-action:hover {
+            text-decoration: underline;
+        }
+
+        .restore-btn {
+            padding: 0.1rem 0.5rem;
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4">PostgreSQL Backup Monitor</h1>
+
+        <div class="row mb-3">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">S3 Configuration</div>
+                    <div class="card-body">
+                        <p><strong>Bucket:</strong> <span id="s3-bucket">Loading...</span></p>
+                        <p><strong>Region:</strong> <span id="s3-region">Loading...</span></p>
+                        <p><strong>Prefix:</strong> <span id="s3-prefix">Loading...</span></p>
+                        <p><strong>Retention:</strong> <span id="retention-days">Loading...</span> days</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">Status</div>
+                    <div class="card-body">
+                        <p class="last-check">Last check: <span id="last-check">Loading...</span></p>
+                        <div class="d-flex gap-2">
+                            <button id="refresh-btn" class="btn btn-primary refresh-btn">Refresh Data</button>
+                            <button id="backup-all-btn" class="btn btn-success refresh-btn">Backup All</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="databases-container">
+            <!-- Database cards will be inserted here -->
+            <div class="text-center">
+                <div class="spinner-border" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p>Loading backup information...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Restore Confirmation Modal -->
+    <div class="modal fade" id="restoreModal" tabindex="-1" aria-labelledby="restoreModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="restoreModalLabel">Confirm Restore</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to restore the database from this backup?</p>
+                    <p><strong>Database:</strong> <span id="restore-db-name"></span></p>
+                    <p><strong>Backup:</strong> <span id="restore-backup-name"></span></p>
+                    <div class="alert alert-warning">
+                        <strong>Warning:</strong> This will overwrite the current database. All existing data will be
+                        replaced with the data from this backup.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger" id="confirm-restore-btn">Restore</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11.7.32/dist/sweetalert2.all.min.js"></script>
+    <script>
+        // Add this to your JavaScript
+        let restoreStatus = {};
+
+        // Function to check restore status
+        function checkRestoreStatus(dbName) {
+            fetch(`/api/restore-status/${dbName}`)
+                .then(response => response.json())
+                .then(data => {
+                    restoreStatus[dbName] = data;
+                    updateRestoreStatusUI(dbName);
+                })
+                .catch(error => {
+                    console.error(`Error checking restore status for ${dbName}:`, error);
+                });
+        }
+
+        // Function to update the UI with restore status
+        function updateRestoreStatusUI(dbName) {
+            const statusElement = document.getElementById(`restore-status-${dbName}`);
+            if (!statusElement) return;
+
+            const status = restoreStatus[dbName];
+            if (!status || !status.in_progress) {
+                statusElement.style.display = 'none';
+                return;
+            }
+
+            statusElement.style.display = 'block';
+            statusElement.innerHTML = `
+                <div class="alert alert-info">
+                    <strong>Restore in progress:</strong> ${status.message}
+                    <div class="progress mt-2">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                             role="progressbar" style="width: ${status.progress}%" 
+                             aria-valuenow="${status.progress}" aria-valuemin="0" aria-valuemax="100">
+                            ${status.progress}%
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Add a restore status section to each database card
+        function addRestoreStatusToCard(dbCard, dbName) {
+            const statusDiv = document.createElement('div');
+            statusDiv.id = `restore-status-${dbName}`;
+            statusDiv.style.display = 'none';
+            statusDiv.className = 'mt-3';
+
+            // Insert after the database info
+            const cardBody = dbCard.querySelector('.card-body');
+            const firstChild = cardBody.firstChild;
+            cardBody.insertBefore(statusDiv, firstChild);
+
+            // Check status initially
+            checkRestoreStatus(dbName);
+
+            // Set up periodic status check
+            setInterval(() => checkRestoreStatus(dbName), 5000);
+        }
+
+        // Function to determine status color based on backup age
+        function getStatusColor(lastBackupAge) {
+            if (lastBackupAge === 'N/A') {
+                return 'status-danger';
+            }
+
+            if (lastBackupAge.includes('hour') || lastBackupAge.includes('minute') || lastBackupAge.includes('second') || lastBackupAge.includes('just now')) {
+                return 'status-good';
+            } else if (lastBackupAge.includes('day') && parseInt(lastBackupAge) <= 3) {
+                return 'status-good';
+            } else if (lastBackupAge.includes('day') && parseInt(lastBackupAge) <= 7) {
+                return 'status-warning';
+            } else {
+                return 'status-danger';
+            }
+        }
+
+        // Function to trigger backup for a database
+        function triggerBackup(dbName) {
+            Swal.fire({
+                title: 'Backup in Progress',
+                text: `Backing up database ${dbName}...`,
+                icon: 'info',
+                showConfirmButton: false,
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
+
+                    // Call the backup API
+                    fetch(`/api/backup/${dbName}`, {
+                        method: 'POST'
+                    })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                Swal.fire({
+                                    title: 'Backup Complete',
+                                    text: data.message,
+                                    icon: 'success',
+                                    confirmButtonText: 'OK'
+                                }).then(() => {
+                                    loadBackupData();
+                                });
+                            } else {
+                                Swal.fire({
+                                    title: 'Backup Failed',
+                                    text: data.message,
+                                    icon: 'error',
+                                    confirmButtonText: 'OK'
+                                });
+                            }
+                        })
+                        .catch(error => {
+                            Swal.fire({
+                                title: 'Backup Failed',
+                                text: `An error occurred: ${error.message}`,
+                                icon: 'error',
+                                confirmButtonText: 'OK'
+                            });
+                        });
+                }
+            });
+        }
+
+        // Function to trigger restore for a backup
+        function triggerRestore(dbName, backupName) {
+            // Set the values in the modal
+            document.getElementById('restore-db-name').textContent = dbName;
+            document.getElementById('restore-backup-name').textContent = backupName;
+
+            // Show the modal
+            const restoreModal = new bootstrap.Modal(document.getElementById('restoreModal'));
+            restoreModal.show();
+
+            // Set up the confirm button
+            document.getElementById('confirm-restore-btn').onclick = function () {
+                restoreModal.hide();
+
+                Swal.fire({
+                    title: 'Restore in Progress',
+                    text: `Restoring database ${dbName} from backup ${backupName}...`,
+                    icon: 'info',
+                    showConfirmButton: false,
+                    allowOutsideClick: false,
+                    didOpen: () => {
+                        Swal.showLoading();
+
+                        // Call the restore API
+                        fetch(`/api/restore/${dbName}`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                backup_name: backupName
+                            })
+                        })
+                            .then(response => response.json())
+                            .then(data => {
+                                if (data.success) {
+                                    Swal.fire({
+                                        title: 'Restore Complete',
+                                        text: data.message,
+                                        icon: 'success',
+                                        confirmButtonText: 'OK',
+                                        showCancelButton: true,
+                                        cancelButtonText: 'View Logs'
+                                    }).then((result) => {
+                                        if (result.dismiss === Swal.DismissReason.cancel) {
+                                            // Show logs
+                                            showLogs(data.logs);
+                                        }
+                                    });
+                                } else {
+                                    Swal.fire({
+                                        title: 'Restore Failed',
+                                        text: data.message,
+                                        icon: 'error',
+                                        confirmButtonText: 'OK',
+                                        showCancelButton: true,
+                                        cancelButtonText: 'View Logs'
+                                    }).then((result) => {
+                                        if (result.dismiss === Swal.DismissReason.cancel) {
+                                            // Show logs
+                                            showLogs(data.logs);
+                                        }
+                                    });
+                                }
+                            })
+                            .catch(error => {
+                                Swal.fire({
+                                    title: 'Restore Failed',
+                                    text: `An error occurred: ${error.message}`,
+                                    icon: 'error',
+                                    confirmButtonText: 'OK'
+                                });
+                            });
+                    }
+                });
+            };
+        }
+
+        // Function to show logs in the modal
+        function showLogs(logs) {
+            if (!logs || logs.length === 0) {
+                document.getElementById('logContent').textContent = 'No logs available';
+            } else {
+                let logText = '';
+                logs.forEach(log => {
+                    logText += `=== ${log.filename} ===\n\n${log.content}\n\n`;
+                });
+                document.getElementById('logContent').textContent = logText;
+            }
+
+            const logModal = new bootstrap.Modal(document.getElementById('logViewerModal'));
+            logModal.show();
+        }
+
+
+
+        // Function to load backup data
+        function loadBackupData() {
+            fetch('/api/backups')
+                .then(response => response.json())
+                .then(data => {
+                    // Update S3 and general info
+                    document.getElementById('s3-bucket').textContent = data.s3_bucket;
+                    document.getElementById('s3-region').textContent = data.s3_region;
+                    document.getElementById('s3-prefix').textContent = data.s3_prefix || '(none)';
+                    document.getElementById('retention-days').textContent = data.retention_days;
+                    document.getElementById('last-check').textContent = data.last_check;
+
+                    // Clear and rebuild database cards
+                    const databasesContainer = document.getElementById('databases-container');
+                    databasesContainer.innerHTML = '';
+
+                    data.databases.forEach(db => {
+                        const statusClass = getStatusColor(db.last_backup_age);
+
+                        let backupsHtml = '';
+                        if (db.backups && db.backups.length > 0) {
+                            backupsHtml = `
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Filename</th>
+                                                <th>Time</th>
+                                                <th>Size</th>
+                                                <th>Age</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            ${db.backups.map(backup => `
+                                                <tr>
+                                                    <td>${backup.name}</td>
+                                                    <td>${backup.time}</td>
+                                                    <td>${backup.size}</td>
+                                                    <td>${backup.age}</td>
+                                                    <td>
+                                                        <button class="btn btn-sm btn-primary restore-btn" 
+                                                                onclick="triggerRestore('${db.name}', '${backup.name}')">
+                                                            Restore
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            `).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            `;
+                        } else {
+                            backupsHtml = '<p class="text-muted">No backups found</p>';
+                        }
+
+                        const dbCard = `
+                            <div class="card">
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <span>${db.name} (${db.database}@${db.host})</span>
+                                    <span class="${statusClass}">${db.last_backup_age}</span>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <p><strong>Schedule:</strong> ${db.schedule}</p>
+                                            <p><strong>Vector Extension:</strong> ${db.vector_extension}</p>
+                                            <button class="btn btn-sm btn-success" onclick="triggerBackup('${db.name}')">
+                                                Backup Now
+                                            </button>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <p><strong>Last Backup:</strong> ${db.last_backup}</p>
+                                            <p><strong>Last Backup Size:</strong> ${db.last_backup_size}</p>
+                                            <p><strong>Total Backups:</strong> ${db.total_backups} (${db.total_size})</p>
+                                        </div>
+                                    </div>
+                                    ${backupsHtml}
+                                </div>
+                            </div>
+                        `;
+
+                        databasesContainer.innerHTML += dbCard;
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching backup data:', error);
+                    document.getElementById('databases-container').innerHTML = `
+                        <div class="alert alert-danger">
+                            Failed to load backup information: ${error.message}
+                        </div>
+                    `;
+                });
+        }
+
+        // Function to backup all databases
+        function backupAllDatabases() {
+            Swal.fire({
+                title: 'Backup All Databases',
+                text: 'Are you sure you want to backup all databases?',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: 'Yes, backup all',
+                cancelButtonText: 'Cancel'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    Swal.fire({
+                        title: 'Backup in Progress',
+                        text: 'Backing up all databases...',
+                        icon: 'info',
+                        showConfirmButton: false,
+                        allowOutsideClick: false,
+                        didOpen: () => {
+                            Swal.showLoading();
+
+                            // Call the backup all API
+                            fetch('/api/backup', {
+                                method: 'POST'
+                            })
+                                .then(response => response.json())
+                                .then(data => {
+                                    if (data.success) {
+                                        Swal.fire({
+                                            title: 'Backup Complete',
+                                            text: data.message,
+                                            icon: 'success',
+                                            confirmButtonText: 'OK'
+                                        }).then(() => {
+                                            loadBackupData();
+                                        });
+                                    } else {
+                                        Swal.fire({
+                                            title: 'Backup Failed',
+                                            text: data.message,
+                                            icon: 'error',
+                                            confirmButtonText: 'OK'
+                                        });
+                                    }
+                                })
+                                .catch(error => {
+                                    Swal.fire({
+                                        title: 'Backup Failed',
+                                        text: `An error occurred: ${error.message}`,
+                                        icon: 'error',
+                                        confirmButtonText: 'OK'
+                                    });
+                                });
+                        }
+                    });
+                }
+            });
+        }
+
+        // Load data on page load
+        document.addEventListener('DOMContentLoaded', loadBackupData);
+
+        // Set up refresh button
+        document.getElementById('refresh-btn').addEventListener('click', loadBackupData);
+
+        // Set up backup all button
+        document.getElementById('backup-all-btn').addEventListener('click', backupAllDatabases);
+
+        // Auto-refresh every 5 minutes
+        setInterval(loadBackupData, 300000);
+    </script>
+
+    <!-- Log Viewer Modal -->
+    <div class="modal fade" id="logViewerModal" tabindex="-1" aria-labelledby="logViewerModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="logViewerModalLabel">Logs</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <pre id="logContent" style="max-height: 500px; overflow-y: auto;"></pre>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

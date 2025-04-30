@@ -1,0 +1,40 @@
+s3:
+  bucket: <your-s3-bucket-name>
+  region: <your-s3-region>
+  access_key: <your-access-key>
+  secret_key: <your-secret-key>
+  endpoint_url: <your-s3-endpoint-url>
+  prefix: <your-s3-prefix>
+  use_path_style: true  # AWS S3 uses virtual-hosted style addressing
+  use_iam_role: false  # Set to true if using IAM roles on EC2/ECS
+
+retention:
+  days: 7
+
+databases:
+  - name: <your-database-name>
+    host: <your-database-host>
+    port: <your-database-port>
+    user: <your-database-user>
+    password: <your-database-password>
+    database: <your-database-name>
+    schedule: "0 2 * * *"  # Daily at 2:00 AM
+    vector_extension: true
+  
+  - name: <your-database-name>
+    host: <your-database-host>
+    port: <your-database-port>
+    user: <your-database-user>
+    password: <your-database-password>
+    database: <your-database-name>
+    schedule: "0 3 * * *"  # Daily at 3:00 AM
+    vector_extension: false
+  
+  - name: <your-database-name>
+    host: <your-database-host>
+    port: <your-database-port>
+    user: <your-database-user>
+    password: <your-database-password>
+    database: <your-database-name>
+    schedule: "0 4 * * *"  # Daily at 4:00 AM
+    vector_extension: false

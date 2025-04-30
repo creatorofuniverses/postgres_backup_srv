@@ -1,0 +1,23 @@
+services:
+  # Backup service
+  postgres-backup:
+    build: .
+    container_name: postgres-backup-s3
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    networks:
+      - proxy
+    restart: unless-stopped
+    environment:
+      - TZ=UTC
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backup.entrypoints=websecure"
+      - "traefik.http.routers.backup.rule=Host(`${BACKUP_SRV_DOMAIN}`)"
+      - "traefik.http.services.backup.loadbalancer.server.port=${BACKUP_SRV_PORT}"
+      - "traefik.http.routers.backup.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.backup.middlewares=oauth2-proxy"
+
+networks:
+  proxy:
+    external: true
