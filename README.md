@@ -2,6 +2,8 @@
 
 A simple Python service for backing up PostgreSQL databases (including those with vector extensions) to S3.
 
+![postgres_backup_demo](./assets/postgres_backup_demo.jpg)
+
 ## Features
 
 - Automatic scheduled backups of multiple PostgreSQL databases
@@ -65,7 +67,7 @@ Edit the `.env` file to configure your environment variables.
 _Notes:_
 - I'm using traefik as reverse proxy, and compose file is configured for it.
 - If you don't use reverse proxy, don't forget to expose the port to the outside.
-- DB user should have enough permissions to restore databases, **check it before** real usage.
+- DB user should have enough permissions to restore databases, **check it before** real usage. (Creating backup NOT equals to restoring it)
 
 ### Build and Run with Docker
 
