@@ -107,6 +107,8 @@ docker exec -it postgres-backup-s3 python /app/restore.py db1 --backup-number 3
 ```
 
 
+**Note:** After restore, you need to restart the service to apply changes.
+
 ### About schedule notation
 
 The schedule is in cron format.
@@ -145,3 +147,10 @@ Namely, schedule format consists of 5 fields:
 | `@weekly` | Run once a week at midnight on Sunday (`0 0 * * 0`) |
 | `@daily` or `@midnight` | Run once a day at midnight (`0 0 * * *`) |
 | `@hourly` | Run once an hour at the beginning of the hour (`0 * * * *`) |
+
+
+## Known issues
+
+- Sometimes restore by button may not work (and CLI too), in my case it was with Zitadel SSO service.
+- - Solution: Just stop service, remove database, create & init it again, start service and restore from backup.
+- - It's a bit tricky, but it works.
